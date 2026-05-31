@@ -5,6 +5,10 @@ cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 export PATH=/usr/local/bin:$HOME/.cargo/bin:$PATH PROTOC=/usr/local/bin/protoc
 
+# Use the docker daemon kubelet uses (cri-dockerd). sudo so it works whether or
+# not the user is in the docker group.
+docker() { sudo docker "$@"; }
+
 [ -d "$BALLISTA_SRC/.git" ] || git clone -b "$BALLISTA_REF" "$BALLISTA_REPO" "$BALLISTA_SRC"
 cd "$BALLISTA_SRC"
 cargo build --release -p ballista-scheduler -p ballista-executor -p ballista-cli
@@ -15,5 +19,5 @@ docker save "ballista-executor:$IMAGE_TAG" | gzip > /tmp/executor.tgz
 for w in $WORKER_NODES; do
   echo "loading executor image on $w"
   rsync /tmp/executor.tgz "$w:/tmp/executor.tgz"
-  ssh "$w" 'gzip -dc /tmp/executor.tgz | docker load'
+  ssh "$w" 'gzip -dc /tmp/executor.tgz | sudo docker load'
 done
