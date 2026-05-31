@@ -16,8 +16,10 @@ docker build -f dev/docker/ballista-scheduler.Dockerfile -t "ballista-scheduler:
 docker build -f dev/docker/ballista-executor.Dockerfile  -t "ballista-executor:$IMAGE_TAG" .
 
 docker save "ballista-executor:$IMAGE_TAG" | gzip > /tmp/executor.tgz
+echo "loading executor image on workers in parallel: $WORKER_NODES"
 for w in $WORKER_NODES; do
-  echo "loading executor image on $w"
-  rsync /tmp/executor.tgz "$w:/tmp/executor.tgz"
-  ssh "$w" 'gzip -dc /tmp/executor.tgz | sudo docker load'
+  ( rsync /tmp/executor.tgz "$w:/tmp/executor.tgz" \
+      && ssh "$w" 'gzip -dc /tmp/executor.tgz | sudo docker load' \
+      && echo "  $w: loaded" ) &
 done
+wait
