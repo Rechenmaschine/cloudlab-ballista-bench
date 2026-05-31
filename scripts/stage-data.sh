@@ -11,10 +11,7 @@ python3 bin/imdb_to_parquet.py --schema data/imdb_schema.sql --csv-dir "$csv" --
 
 echo "copying dataset to workers in parallel: $WORKER_NODES"
 for w in $WORKER_NODES; do
-  rsync -a --delete "$DATA_DIR/" "$w:$DATA_DIR/" &
+  ( rsync -a --delete "$DATA_DIR/" "$w:$DATA_DIR/" && echo "  $w: done" ) &
 done
 wait
-echo "staged; tables per worker:"
-for w in $WORKER_NODES; do
-  printf "  %s: " "$w"; ssh "$w" "ls '$DATA_DIR' 2>/dev/null | wc -l"
-done
+echo "all workers staged"
