@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ballista-scheduler
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: ballista-scheduler }
+  template:
+    metadata:
+      labels: { app: ballista-scheduler }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ${CONTROL_NODE}
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: scheduler
+          image: ballista-scheduler:${IMAGE_TAG}
+          imagePullPolicy: Never
+          args: ["--bind-host=0.0.0.0", "--bind-port=50050", "--external-host=ballista-scheduler"]
+          env:
+            - { name: BALLISTA_STAGE_METRICS, value: json }
+          ports:
+            - { containerPort: 50050 }
+          readinessProbe:
+            tcpSocket: { port: 50050 }
+          # The scheduler lists the parquet files during physical planning, so
+          # it needs the dataset at the same path as the executors.
+          volumeMounts:
+            - { name: data, mountPath: ${DATA_DIR}, readOnly: true }
+      volumes:
+        - name: data
+          hostPath: { path: ${DATA_DIR}, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ballista-scheduler
+  namespace: ${NAMESPACE}
+spec:
+  selector: { app: ballista-scheduler }
+  ports:
+    - { port: 50050, targetPort: 50050 }

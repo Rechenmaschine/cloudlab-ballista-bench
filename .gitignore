@@ -1,0 +1,9 @@
+# local run artifacts (results are pulled to ./trace/ or live on node-0)
+*.log
+*.err
+trace/
+sql/
+
+# .env here is cluster config (no secrets) and is tracked on purpose,
+# overriding any global gitignore that excludes .env.
+!.env

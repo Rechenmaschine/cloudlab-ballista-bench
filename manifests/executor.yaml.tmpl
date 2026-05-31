@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ballista-executor
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    matchLabels: { app: ballista-executor }
+  template:
+    metadata:
+      labels: { app: ballista-executor }
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+      containers:
+        - name: executor
+          image: ballista-executor:${IMAGE_TAG}
+          imagePullPolicy: Never
+          args:
+            - --bind-host=0.0.0.0
+            - --bind-port=50051
+            - --scheduler-host=ballista-scheduler
+            - --scheduler-port=50050
+            - --work-dir=/work
+            - --external-host=$(POD_IP)
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef: { fieldPath: status.podIP }
+          volumeMounts:
+            - { name: data, mountPath: ${DATA_DIR}, readOnly: true }
+            - { name: work, mountPath: /work }
+      volumes:
+        - name: data
+          hostPath: { path: ${DATA_DIR}, type: Directory }
+        - name: work
+          hostPath: { path: ${WORK_DIR}, type: DirectoryOrCreate }
