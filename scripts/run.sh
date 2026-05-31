@@ -29,6 +29,12 @@ python3 bin/gen_sql.py --workload "$WORKLOAD_CSV" --data-dir "$DATA_DIR" \
 start=$(date -u -d '2 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
 
 echo ">> [2/3] submitting queries (this is the timed part)..."
+# best-effort live counter: one tick per completed query (scheduler job rollup)
+( kubectl -n "$NAMESPACE" logs deploy/ballista-scheduler -f --since-time="$start" 2>/dev/null \
+    | grep --line-buffered '"kind":"job"' \
+    | awk "{ printf \"\r  completed: %d/$queries\", NR; fflush() }" ) &
+prog=$!
+
 if [ "$concurrency" -le 1 ]; then
   "$cli" --host "$sched" --port "$SCHEDULER_PORT" --quiet -f "$run/setup.sql" -f "$run/workload.sql" > "$run/cli.log" 2>&1
 else
@@ -40,6 +46,7 @@ else
   wait $pids
 fi
 
+kill "$prog" 2>/dev/null || true; echo
 echo ">> [3/3] collecting scheduler metrics..."
 kubectl -n "$NAMESPACE" logs deploy/ballista-scheduler --since-time="$start" > "$run/stages.jsonl"
 
