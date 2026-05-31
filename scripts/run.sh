@@ -36,13 +36,15 @@ echo ">> [1/3] generating SQL..."
 python3 bin/gen_sql.py --workload "$WORKLOAD_CSV" --data-dir "$DATA_DIR" \
   --out-dir "$run" --limit "$queries" --shards "$concurrency"
 
-# Mark the log start, run the queries, then pull the scheduler's stage metrics
-# emitted since then (one shot - no fragile long-lived `logs -f` stream).
 start=$(date -u -d '2 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
 
 echo ">> [2/3] submitting queries (this is the timed part)..."
-# best-effort live counter: one tick per completed query (scheduler job rollup)
+# Stream the scheduler's metrics to disk LIVE and derive the progress counter
+# from the same stream. A post-hoc `logs --since-time` loses lines once kubelet
+# rotates the container log (it silently dropped ~75% of a 2000-query run).
 ( kubectl -n "$NAMESPACE" logs deploy/ballista-scheduler -f --since-time="$start" 2>/dev/null \
+    | grep --line-buffered '"kind":"' \
+    | tee "$run/stages.jsonl" \
     | grep --line-buffered '"kind":"job"' \
     | awk "{ printf \"\r  completed: %d/$queries\", NR; fflush() }" ) &
 prog=$!
@@ -58,9 +60,9 @@ else
   wait $pids
 fi
 
-kill "$prog" 2>/dev/null || true; echo
-echo ">> [3/3] collecting scheduler metrics..."
-kubectl -n "$NAMESPACE" logs deploy/ballista-scheduler --since-time="$start" > "$run/stages.jsonl"
+sleep 2                                              # let trailing rollups flush into the stream
+pkill -P "$prog" 2>/dev/null; kill "$prog" 2>/dev/null || true; echo
+echo ">> [3/3] metrics captured live -> $run/stages.jsonl"
 
 submitted=$(cat "$run"/workload*.sql 2>/dev/null | grep -c ';')
 jobs=$(grep -c '"kind":"job"' "$run/stages.jsonl" || true)
