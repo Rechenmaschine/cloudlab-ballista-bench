@@ -5,6 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 
+# Ctrl-C cleanly stops all drivers + the progress tail.
+trap 'echo; echo "stopping..."; pkill -P $$ 2>/dev/null; exit 130' INT TERM
+
 queries=${1:-2000}
 concurrency=${2:-1}
 ts=$(date +%Y%m%d-%H%M%S)
