@@ -10,6 +10,13 @@ vars='$NAMESPACE $CONTROL_NODE $IMAGE_TAG $DATA_DIR $WORK_DIR'
 render() { for t in manifests/*.yaml.tmpl; do envsubst "$vars" < "$t"; echo ---; done; }
 
 echo ">> wiping namespace $NAMESPACE"
-kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait
+kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait=false
+echo ">> waiting for $NAMESPACE to terminate"
+kubectl wait --for=delete namespace/"$NAMESPACE" --timeout=120s || {
+  echo "!! namespace stuck terminating, clearing finalizers" >&2
+  kubectl get ns "$NAMESPACE" -o json \
+    | jq 'del(.spec.finalizers)' \
+    | kubectl replace --raw "/api/v1/namespaces/$NAMESPACE/finalize" -f -
+}
 echo ">> deploying"
 render | kubectl apply -f -
