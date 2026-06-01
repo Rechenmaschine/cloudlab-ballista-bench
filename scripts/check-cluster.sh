@@ -137,8 +137,8 @@ except Exception: print("")' 2>/dev/null)
     if [ -n "$bws" ]; then
       read -r mn mean <<<"$(echo $bws | tr ' ' '\n' | awk 'NR==1{m=$1} {s+=$1;n++; if($1<m)m=$1} END{printf "%d %d", m, s/n}')"
       echo "  min=$(awk -v b="$mn" 'BEGIN{printf "%.2f",b/1e9}') Gbit/s  mean=$(awk -v b="$mean" 'BEGIN{printf "%.2f",b/1e9}') Gbit/s"
-      echo "  -> measured intra-cluster bandwidth. Compare to .env INTRA_CLUSTER_BANDWIDTH_BPS=$INTRA_CLUSTER_BANDWIDTH_BPS"
-      echo "     (conservative: set it to the min link -> INTRA_CLUSTER_BANDWIDTH_BPS=$mn)"
+      echo "  -> measured intra-cluster bandwidth. This is a cost-model knob (set in carma-all, not .env)."
+      echo "     median above; conservative = min link = $mn bps."
     fi
   fi
 fi

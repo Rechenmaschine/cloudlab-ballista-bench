@@ -104,4 +104,4 @@ for s in "${nodes[@]}"; do
   echo
 done
 echo "median=$(awk -v m="$med" 'BEGIN{printf "%.2f", m/1000}') Gbit/s   (* = link < 60% of median; ? = no result)"
-echo ">> for the cost model, INTRA_CLUSTER_BANDWIDTH_BPS ~ median*1e9 = $(( med * 1000000 ))"
+echo ">> cost-model intra-cluster bandwidth (set in carma-all, not .env): median = $(( med * 1000000 )) bps"
