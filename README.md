@@ -20,6 +20,7 @@ scripts/gen-workload.sh  # generate the query set: clone Redbench, download the 
 scripts/build.sh         # build the Ballista scheduler/executor Docker images + ballista-cli from the fork, load them on the workers
 scripts/stage-data.sh    # download the IMDb/JOB CSVs, convert to Parquet, copy the tables to every worker node
 scripts/deploy.sh        # render the manifests from .env and apply the scheduler pod + executor DaemonSet
+scripts/check-cluster.sh # assert the cluster is homogeneous (every executor pinned to TASK_SLOTS cores); add --net to iperf3 the worker links
 scripts/run.sh 2000 16   # replay 2000 workload queries with 16 concurrent ballista-cli drivers; capture per-run metrics
 scripts/status.sh        # show pod placement and how many executors have registered
 ```
@@ -35,7 +36,7 @@ auto-derived from the cluster.
 .env        config: paths, image tag, fork repo/ref (nodes auto-derived)
 bin/        CSV->Parquet + CSV->SQL helpers
 manifests/  scheduler + executor, rendered from .env
-scripts/    setup-node, build, stage-data, deploy, run, status
+scripts/    setup-node, build, stage-data, deploy, check-cluster, run, status
 ```
 
 ## Runs

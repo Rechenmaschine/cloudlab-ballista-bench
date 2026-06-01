@@ -108,6 +108,30 @@ cat > "$run/cluster.json" <<JSON
 }
 JSON
 
+# Config snapshot: capture EXACTLY what produced this run so it's reproducible.
+# cluster.json/meta.txt record the cluster shape and the request; this records
+# the .env knobs + the code versions + what the executors were ACTUALLY pinned
+# to (cgroup truth from the live pod, not just the .env intent).
+cp ./.env "$run/env.snapshot"
+{
+  echo "bench_repo_rev=$(git rev-parse --short HEAD 2>/dev/null)$([ -n "$(git status --porcelain 2>/dev/null)" ] && echo -dirty)"
+  echo "ballista_ref=$BALLISTA_REF"
+  echo "ballista_rev=$(git -C "$BALLISTA_SRC" rev-parse --short HEAD 2>/dev/null)"
+  echo "image_tag=$IMAGE_TAG"
+  echo "task_slots=$TASK_SLOTS"
+  echo "control_node=$CONTROL_NODE"
+  echo "worker_nodes=$WORKER_NODES"
+  echo "executor_cpu_request=$(kubectl -n "$NAMESPACE" get pod -l app=ballista-executor -o jsonpath='{.items[0].spec.containers[0].resources.requests.cpu}' 2>/dev/null)"
+  echo "executor_cpu_limit=$(kubectl -n "$NAMESPACE" get pod -l app=ballista-executor -o jsonpath='{.items[0].spec.containers[0].resources.limits.cpu}' 2>/dev/null)"
+  echo "executor_qos=$(kubectl -n "$NAMESPACE" get pod -l app=ballista-executor -o jsonpath='{.items[0].status.qosClass}' 2>/dev/null)"
+  # SMT/core state: executor node's real core count (16/20 => hyperthreading off)
+  # + the control node's smt toggle, so a run records whether HT silently returned.
+  exnode=$(kubectl -n "$NAMESPACE" get pod -l app=ballista-executor -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)
+  echo "executor_node=$exnode"
+  echo "executor_node_cpus=$(kubectl get node "$exnode" -o jsonpath='{.status.capacity.cpu}' 2>/dev/null)"
+  echo "smt_control=$(cat /sys/devices/system/cpu/smt/control 2>/dev/null)"
+} > "$run/config.txt"
+
 submitted=$(cat "$run"/workload*.sql 2>/dev/null | grep -c ';')
 jobs=$(grep -c '"kind":"job"' "$run/rollups.jsonl" || true)
 stage_records=$(grep -c '"kind":"stage_trace"' "$run/stages.jsonl" || true)

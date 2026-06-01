@@ -27,12 +27,24 @@ spec:
             - --scheduler-port=50050
             - --work-dir=/work
             - --external-host=$(POD_IP)
-            # Pin a uniform task-slot count so the cluster is HOMOGENEOUS even
-            # though nodes differ (some 32-core, some 40-core). Default 0 means
-            # "use all cores", which would give 32- and 40-slot executors a
-            # mismatched parallelism and make cores_per_executor ill-defined.
-            # Keep TASK_SLOTS <= the smallest node's core count.
+            # Run exactly TASK_SLOTS concurrent tasks (one partition each). With
+            # the CPU pin below this equals the CPU budget, so slots == cores
+            # and we never schedule more tasks than the executor has cores.
             - --concurrent-tasks=${TASK_SLOTS}
+          # Pin every executor's CPU to exactly TASK_SLOTS cores (request ==
+          # limit, hard-capped by the CFS quota), so all nodes look IDENTICAL
+          # even though they have 16 vs 20 real cores (hyperthreading disabled
+          # via setup-node.sh). This makes cores_per_executor a single
+          # well-defined number for the cost model. Memory is intentionally left
+          # unbounded (no limit) so an executor can use its node's full RAM -
+          # nodes are RAM-equal so this stays uniform, and a memory limit would
+          # risk OOM-kills on heavy queries. (QoS is therefore Burstable, not
+          # Guaranteed; with the default CPU-manager policy that makes no
+          # difference to CPU behaviour.) TASK_SLOTS must be <= the smallest
+          # node's allocatable CPU (16 minus k8s reserve) or pods stay Pending.
+          resources:
+            requests: { cpu: "${TASK_SLOTS}" }
+            limits:   { cpu: "${TASK_SLOTS}" }
           env:
             - name: POD_IP
               valueFrom:
