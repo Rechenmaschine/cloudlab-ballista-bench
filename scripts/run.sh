@@ -78,12 +78,13 @@ tail -c "+$((trace_off + 1))" "$trace_file" > "$run/stages.jsonl" 2>/dev/null ||
 echo ">> [3/3] full trace -> $run/stages.jsonl  (rollups -> $run/rollups.jsonl)"
 
 # Run-level cluster shape + pricing (carma ClusterHardware / PricingConfig).
-# num_executors / cores / memory are MEASURED from the live cluster; cache,
-# bandwidth and pricing are the modeled knobs from .env. Without this carma's
-# trace_replay falls back to a guessed reference cluster.
-wcap=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' \
-  -o jsonpath='{.items[0].status.capacity.cpu} {.items[0].status.capacity.memory}' 2>/dev/null || echo "0 0Ki")
-cores=${wcap%% *}; memraw=${wcap##* }
+# num_executors is MEASURED; cores_per_executor is the PINNED TASK_SLOTS (the
+# executors are homogenized via --concurrent-tasks, so the slot count, not a
+# node's physical core count, is the cluster's true parallelism unit). Memory
+# is measured from a worker (nodes are uniform on RAM). cache/bandwidth/pricing
+# are the modeled knobs from .env.
+memraw=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' \
+  -o jsonpath='{.items[0].status.capacity.memory}' 2>/dev/null || echo "0Ki")
 case "$memraw" in
   *Ki) mem_bytes=$(( ${memraw%Ki} * 1024 )) ;;
   *Mi) mem_bytes=$(( ${memraw%Mi} * 1048576 )) ;;
@@ -95,7 +96,7 @@ cat > "$run/cluster.json" <<JSON
 {
   "cluster_hardware": {
     "num_executors": $execs,
-    "cores_per_executor": ${cores:-0},
+    "cores_per_executor": $TASK_SLOTS,
     "memory_per_executor_bytes": $mem_bytes,
     "cache_bytes_per_executor": $CACHE_BYTES_PER_EXECUTOR,
     "intra_cluster_bandwidth_bps": $INTRA_CLUSTER_BANDWIDTH_BPS

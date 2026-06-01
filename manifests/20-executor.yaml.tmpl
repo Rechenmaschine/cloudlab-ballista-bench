@@ -27,6 +27,12 @@ spec:
             - --scheduler-port=50050
             - --work-dir=/work
             - --external-host=$(POD_IP)
+            # Pin a uniform task-slot count so the cluster is HOMOGENEOUS even
+            # though nodes differ (some 32-core, some 40-core). Default 0 means
+            # "use all cores", which would give 32- and 40-slot executors a
+            # mismatched parallelism and make cores_per_executor ill-defined.
+            # Keep TASK_SLOTS <= the smallest node's core count.
+            - --concurrent-tasks=${TASK_SLOTS}
           env:
             - name: POD_IP
               valueFrom:
