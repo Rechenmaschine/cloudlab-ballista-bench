@@ -34,7 +34,7 @@ echo ">> run '$name': $queries queries, concurrency $concurrency, scheduler $sch
 
 echo ">> [1/3] generating SQL..."
 python3 bin/gen_sql.py --workload "$WORKLOAD_CSV" --data-dir "$DATA_DIR" \
-  --out-dir "$run" --limit "$queries" --shards "$concurrency"
+  --out-dir "$run" --limit "$queries"
 
 start=$(date -u -d '2 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
 
@@ -58,16 +58,25 @@ echo ">> [2/3] submitting queries (this is the timed part)..."
     | awk "{ printf \"\r  completed: %d/$queries\", NR; fflush() }" ) &
 prog=$!
 
-if [ "$concurrency" -le 1 ]; then
-  "$cli" --host "$sched" --port "$SCHEDULER_PORT" --quiet -f "$run/setup.sql" -f "$run/workload.sql" > "$run/cli.log" 2>&1
-else
-  pids=""
-  for i in $(seq 0 $((concurrency - 1))); do
-    "$cli" --host "$sched" --port "$SCHEDULER_PORT" --quiet -f "$run/setup.sql" -f "$run/workload.$i.sql" > "$run/cli.$i.log" 2>&1 &
-    pids="$pids $!"
-  done
-  wait $pids
-fi
+# Work-conserving submission: $concurrency client slots drain ONE global,
+# arrival-ordered queue of queries (queries/q*.sql). xargs -P keeps exactly
+# $concurrency queries in flight and starts the next one the instant a slot
+# frees, so cluster load stays uniform until the final <$concurrency tail. This
+# replaces fixed per-client shards, where a client that finished its shard went
+# idle while others ran -- effective concurrency decayed for the whole tail.
+#
+# Each query runs in its own CLI session and so re-runs setup.sql. That is
+# required: CREATE EXTERNAL TABLE is session-scoped in DataFusion, so a query
+# only sees the tables if its own session registered them. setup.sql is catalog
+# registration only (no data movement) and emits no stage_trace, so carma-all's
+# per-stage cost calibration is unaffected; the cost is a per-query registration
+# gap. To remove it, register the tables cluster-side once so sessions inherit
+# them, then drop the `-f setup.sql` below.
+export cli sched SCHEDULER_PORT run
+printf '%s\n' "$run"/queries/q*.sql | sort | xargs -P "$concurrency" -I QF sh -c '
+  "$cli" --host "$sched" --port "$SCHEDULER_PORT" --quiet \
+    -f "$run/setup.sql" -f "$1" >> "$run/cli.log" 2>&1
+' sh QF
 
 sleep 2                                              # let trailing rollups + trace lines flush
 pkill -P "$prog" 2>/dev/null; kill "$prog" 2>/dev/null || true; echo
@@ -126,7 +135,7 @@ cp ./.env "$run/env.snapshot"
   echo "smt_control=$(cat /sys/devices/system/cpu/smt/control 2>/dev/null)"
 } > "$run/config.txt"
 
-submitted=$(cat "$run"/workload*.sql 2>/dev/null | grep -c ';')
+submitted=$(ls "$run"/queries/q*.sql 2>/dev/null | wc -l | tr -d ' ')
 jobs=$(grep -c '"kind":"job"' "$run/rollups.jsonl" || true)
 stage_records=$(grep -c '"kind":"stage_trace"' "$run/stages.jsonl" || true)
 {
