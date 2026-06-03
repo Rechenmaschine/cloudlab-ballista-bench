@@ -58,25 +58,20 @@ echo ">> [2/3] submitting queries (this is the timed part)..."
     | awk "{ printf \"\r  completed: %d/$queries\", NR; fflush() }" ) &
 prog=$!
 
-# Work-conserving submission: $concurrency client slots drain ONE global,
-# arrival-ordered queue of queries (queries/q*.sql). xargs -P keeps exactly
-# $concurrency queries in flight and starts the next one the instant a slot
-# frees, so cluster load stays uniform until the final <$concurrency tail. This
-# replaces fixed per-client shards, where a client that finished its shard went
-# idle while others ran -- effective concurrency decayed for the whole tail.
-#
-# Each query runs in its own CLI session and so re-runs setup.sql. That is
-# required: CREATE EXTERNAL TABLE is session-scoped in DataFusion, so a query
-# only sees the tables if its own session registered them. setup.sql is catalog
-# registration only (no data movement) and emits no stage_trace, so carma-all's
-# per-stage cost calibration is unaffected; the cost is a per-query registration
-# gap. To remove it, register the tables cluster-side once so sessions inherit
-# them, then drop the `-f setup.sql` below.
-export cli sched SCHEDULER_PORT run
-printf '%s\n' "$run"/queries/q*.sql | sort | xargs -P "$concurrency" -I QF sh -c '
-  "$cli" --host "$sched" --port "$SCHEDULER_PORT" --quiet \
-    -f "$run/setup.sql" -f "$1" >> "$run/cli.log" 2>&1
-' sh QF
+# Work-conserving submission via carma_submit: $concurrency PERSISTENT client
+# sessions register the tables once (setup.sql), then drain ONE global,
+# arrival-ordered queue (queries/q*.sql). Each session runs one query at a time
+# and grabs the next the instant it finishes, so exactly $concurrency queries
+# are in flight until the final <$concurrency tail -- uniform cluster load, and
+# unlike a fresh ballista-cli per query, NO per-query reconnect or table
+# re-registration (that artifact cost ~50ms/query and dented effective
+# concurrency). setup.sql is catalog registration only (no data movement) and
+# emits no stage_trace, so carma-all's per-stage cost calibration is unaffected.
+submitter="${cli%/*}/carma_submit"
+[ -x "$submitter" ] || { echo "carma_submit not built at $submitter -- run scripts/build.sh"; rmdir "$run" 2>/dev/null; exit 1; }
+"$submitter" --host "$sched" --port "$SCHEDULER_PORT" \
+  --concurrency "$concurrency" --queries-dir "$run/queries" --setup "$run/setup.sql" \
+  > "$run/cli.log" 2>&1
 
 sleep 2                                              # let trailing rollups + trace lines flush
 pkill -P "$prog" 2>/dev/null; kill "$prog" 2>/dev/null || true; echo
