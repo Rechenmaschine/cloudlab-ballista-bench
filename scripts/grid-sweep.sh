@@ -21,13 +21,12 @@ prep() { for n in $WORKER_NODES; do ssh -o BatchMode=yes -o ConnectTimeout=8 "$n
   sync; echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null' 2>/dev/null; done; }
 
 KS="1 2 3 5 8 10 20"; REPS="1 2 3"; QUERIES=1000
-QUERY_TIMEOUT=600                     # kill a run if NO query completes for this many seconds (10 min)
 total=$(( $(echo $KS | wc -w) * $(echo $REPS | wc -w) )); i=0; sweep_start=$(date +%s)
 fmt() { printf "%02d:%02d:%02d" $(($1/3600)) $(($1%3600/60)) $(($1%60)); }
 
 echo "############################################################"
 echo "## CARMA grid sweep: $total points (K={$KS} x rep={$REPS}), $QUERIES queries each"
-echo "## per-query stall guard: $((QUERY_TIMEOUT/60))m | started $(date '+%F %T')"
+echo "## no stall guard (runs go to completion) | started $(date '+%F %T')"
 echo "############################################################"
 
 for rep in $REPS; do
@@ -45,32 +44,15 @@ for rep in $REPS; do
     echo "-- node prep (governor/turbo/idle/caches) ------------------"
     prep; echo "   prep done"
 
-    echo "-- run: $QUERIES queries @ concurrency $K (live below; stall guard ${QUERY_TIMEOUT}s) --"
+    echo "-- run: $QUERIES queries @ concurrency $K (live below; runs to completion, no stall guard) --"
     ./scripts/run.sh "$QUERIES" "$K" "$name" &
     runpid=$!
-    prev=-1; last_progress=$(date +%s); rc=0
-    while kill -0 "$runpid" 2>/dev/null; do
-      sleep 30
-      rd=$(ls -dt /storage/carma/runs/${name}-*/ 2>/dev/null | head -1)
-      n=$(grep -c '"kind":"job"' "${rd}rollups.jsonl" 2>/dev/null); n=${n:-0}
-      now=$(date +%s)
-      if [ "$n" -gt "$prev" ]; then prev=$n; last_progress=$now; fi
-      if [ $(( now - last_progress )) -ge "$QUERY_TIMEOUT" ]; then
-        echo "## STALL: no query completed in $((QUERY_TIMEOUT/60))m (stuck at ${n}/${QUERIES}) -- killing run"
-        kill -TERM "$runpid" 2>/dev/null; sleep 5; kill -KILL "$runpid" 2>/dev/null
-        rc=124; break
-      fi
-    done
-    if [ "$rc" -ne 124 ]; then wait "$runpid"; rc=$?; fi
-    pkill -f "ballista-cli --host" 2>/dev/null
+    wait "$runpid"; rc=$?
+    pkill -x carma_submit 2>/dev/null
 
     dur=$(( $(date +%s)-t0 )); elapsed=$(( $(date +%s)-sweep_start ))
     avg=$(( elapsed / i )); eta=$(( avg * (total-i) ))
-    if [ "$rc" -eq 124 ]; then
-      echo "## [$i/$total] $name STALLED (no progress ${QUERY_TIMEOUT}s) -- killed, continuing"
-    else
-      echo "## [$i/$total] $name DONE rc=$rc in $(fmt $dur)   | $(grep -hE 'jobs=' /storage/carma/runs/${name}-*/meta.txt 2>/dev/null | head -1)"
-    fi
+    echo "## [$i/$total] $name DONE rc=$rc in $(fmt $dur)   | $(grep -hE 'jobs=' /storage/carma/runs/${name}-*/meta.txt 2>/dev/null | head -1)"
     echo "## progress: $i/$total done | sweep elapsed $(fmt $elapsed) | est. remaining $(fmt $eta)"
   done
 done
