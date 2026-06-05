@@ -10,7 +10,8 @@ set -a; . ./.env; set +a
 
 tmux kill-session -t carma 2>/dev/null; pkill -f "ballista-cli --host" 2>/dev/null; pkill -f "scripts/run.sh" 2>/dev/null; sleep 3
 
-wait_execs() { for i in $(seq 1 40); do [ "$(kubectl -n carma get pods -l app=ballista-executor --no-headers 2>/dev/null | grep -c Running)" -ge 3 ] && return 0; sleep 5; done; return 1; }
+# local i: MUST NOT clobber the global point counter (it did, corrupting [i/total])
+wait_execs() { local i; for i in $(seq 1 40); do [ "$(kubectl -n carma get pods -l app=ballista-executor --no-headers 2>/dev/null | grep -c Running)" -ge 3 ] && return 0; sleep 5; done; return 1; }
 
 # per-run node prep: performance governor, no turbo, disable idle states, drop caches (reproducible timing)
 prep() { for n in $WORKER_NODES; do ssh -o BatchMode=yes -o ConnectTimeout=8 "$n" '
@@ -21,6 +22,9 @@ prep() { for n in $WORKER_NODES; do ssh -o BatchMode=yes -o ConnectTimeout=8 "$n
   sync; echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null' 2>/dev/null; done; }
 
 KS="${KS:-1 2 3 4 5 6 7 8 9 10 15 20}"; REPS="${REPS:-1 2 3 4 5}"; QUERIES="${QUERIES:-1000}"
+
+# Preflight: don't start a multi-hour sweep that can't run a single point.
+[ -f "$WORKLOAD_CSV" ] || { echo "FATAL: $WORKLOAD_CSV missing - run scripts/gen-workload.sh first"; exit 1; }
 total=$(( $(echo $KS | wc -w) * $(echo $REPS | wc -w) )); i=0; sweep_start=$(date +%s)
 fmt() { printf "%02d:%02d:%02d" $(($1/3600)) $(($1%3600/60)) $(($1%60)); }
 
@@ -49,6 +53,9 @@ for rep in $REPS; do
     runpid=$!
     wait "$runpid"; rc=$?
     pkill -x carma_submit 2>/dev/null
+    # rc!=0 means setup/infra failure (run.sh is set -e), not slowness: abort loudly
+    # instead of grinding out 60 unusable points.
+    [ "$rc" -ne 0 ] && { echo "## ABORT: $name failed rc=$rc - fix and restart sweep"; exit 1; }
 
     dur=$(( $(date +%s)-t0 )); elapsed=$(( $(date +%s)-sweep_start ))
     avg=$(( elapsed / i )); eta=$(( avg * (total-i) ))
