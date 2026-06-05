@@ -20,7 +20,7 @@ prep() { for n in $WORKER_NODES; do ssh -o BatchMode=yes -o ConnectTimeout=8 "$n
   for s in /sys/devices/system/cpu/cpu*/cpuidle/state[1-9]; do echo 1 | sudo tee $s/disable >/dev/null 2>&1; done
   sync; echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null' 2>/dev/null; done; }
 
-KS="1 2 3 5 8 10 20"; REPS="1 2 3"; QUERIES=1000
+KS="${KS:-1 2 3 4 5 6 7 8 9 10 15 20}"; REPS="${REPS:-1 2 3 4 5}"; QUERIES="${QUERIES:-1000}"
 total=$(( $(echo $KS | wc -w) * $(echo $REPS | wc -w) )); i=0; sweep_start=$(date +%s)
 fmt() { printf "%02d:%02d:%02d" $(($1/3600)) $(($1%3600/60)) $(($1%60)); }
 
