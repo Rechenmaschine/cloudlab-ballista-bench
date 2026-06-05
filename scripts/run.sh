@@ -73,7 +73,17 @@ submitter="${cli%/*}/carma_submit"
   --concurrency "$concurrency" --queries-dir "$run/queries" --setup "$run/setup.sql" \
   > "$run/cli.log" 2>&1
 
-sleep 2                                              # let trailing rollups + trace lines flush
+# Wait for trailing rollups to flush. The scheduler logs the final "job" line
+# AFTER the client already got its results, and that line still has to travel
+# kubelet -> apiserver -> kubectl -f -> tee. A fixed sleep raced this and
+# sometimes lost the last line (jobs=999/1000), so poll until the rollup count
+# matches what we submitted (bounded: failed queries emit no rollup).
+expected=$(ls "$run"/queries/q*.sql 2>/dev/null | wc -l | tr -d ' ')
+for _ in $(seq 1 30); do
+  got=$(grep -c '"kind":"job"' "$run/rollups.jsonl" 2>/dev/null || true)
+  [ "${got:-0}" -ge "$expected" ] && break
+  sleep 1
+done
 pkill -P "$prog" 2>/dev/null; kill "$prog" 2>/dev/null || true; echo
 
 # Slice this run's portion of the shared trace file into the run dir. This is
