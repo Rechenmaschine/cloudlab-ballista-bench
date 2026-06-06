@@ -54,7 +54,7 @@ for w in $WORKER_NODES; do
 done
 
 sudo apt-get update -qq
-sudo apt-get install -y -qq build-essential pkg-config libssl-dev cmake unzip curl git gettext-base iperf3
+sudo apt-get install -y -qq build-essential pkg-config libssl-dev cmake unzip curl git gettext-base iperf3 jq
 command -v cargo >/dev/null || curl -sSf https://sh.rustup.rs | sh -s -- -y
 if [ ! -x /usr/local/bin/protoc ]; then
   curl -sSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v27.2/protoc-27.2-linux-x86_64.zip
