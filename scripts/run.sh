@@ -27,9 +27,17 @@ mkdir -p "$run"
 sched=$(kubectl -n "$NAMESPACE" get pod -l app=ballista-scheduler -o jsonpath='{.items[0].status.podIP}')
 cli=$BALLISTA_SRC/target/release/ballista-cli
 
-# Don't benchmark an unhealthy cluster (a flapping cluster silently drops jobs).
-execs=$(curl -s "http://$sched:$SCHEDULER_PORT/api/executors" | grep -o '"host":' | wc -l)
-[ "$execs" -ge 1 ] || { echo "no executors registered (scheduler $sched) - check scripts/status.sh"; rmdir "$run"; exit 1; }
+# Don't benchmark an unhealthy or PARTIAL cluster (a flapping cluster silently
+# drops jobs; a missing executor skews every point). Require one registered
+# executor per worker node - pods Running != registered, so poll the scheduler
+# API with a grace period for late registrations.
+want=$(echo $WORKER_NODES | wc -w)
+for _ in $(seq 1 30); do
+  execs=$(curl -s "http://$sched:$SCHEDULER_PORT/api/executors" | grep -o '"host":' | wc -l)
+  [ "$execs" -ge "$want" ] && break
+  sleep 2
+done
+[ "$execs" -ge "$want" ] || { echo "only $execs/$want executors registered after 60s (scheduler $sched) - check scripts/status.sh"; rmdir "$run"; exit 1; }
 echo ">> run '$name': $queries queries, concurrency $concurrency, scheduler $sched ($execs executors)"
 
 echo ">> [1/3] generating SQL..."

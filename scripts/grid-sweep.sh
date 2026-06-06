@@ -10,8 +10,10 @@ set -a; . ./.env; set +a
 
 tmux kill-session -t carma 2>/dev/null; pkill -f "ballista-cli --host" 2>/dev/null; pkill -f "scripts/run.sh" 2>/dev/null; sleep 3
 
+# Expected executor count = one per worker node (daemonset), NOT hardcoded.
+EXECS_WANT=$(echo $WORKER_NODES | wc -w)
 # local i: MUST NOT clobber the global point counter (it did, corrupting [i/total])
-wait_execs() { local i; for i in $(seq 1 40); do [ "$(kubectl -n carma get pods -l app=ballista-executor --no-headers 2>/dev/null | grep -c Running)" -ge 3 ] && return 0; sleep 5; done; return 1; }
+wait_execs() { local i; for i in $(seq 1 40); do [ "$(kubectl -n "$NAMESPACE" get pods -l app=ballista-executor --no-headers 2>/dev/null | grep -c Running)" -ge "$EXECS_WANT" ] && return 0; sleep 5; done; return 1; }
 
 # per-run node prep: performance governor, no turbo, disable idle states, drop caches (reproducible timing)
 prep() { for n in $WORKER_NODES; do ssh -o BatchMode=yes -o ConnectTimeout=8 "$n" '
@@ -43,8 +45,8 @@ for rep in $REPS; do
 
     echo "-- deploy (wipe + redeploy + pin) --------------------------"
     ./scripts/deploy.sh
-    echo "-- wait for 3 executors ------------------------------------"
-    wait_execs && echo "   ok: 3 executors Running" || echo "   WARN: <3 executors after 200s, running anyway"
+    echo "-- wait for $EXECS_WANT executors --------------------------------"
+    wait_execs && echo "   ok: $EXECS_WANT executors Running" || echo "   WARN: <$EXECS_WANT executors after 200s, running anyway (run.sh will abort if they never register)"
     echo "-- node prep (governor/turbo/idle/caches) ------------------"
     prep; echo "   prep done"
 
