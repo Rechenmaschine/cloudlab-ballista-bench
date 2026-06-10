@@ -65,7 +65,17 @@ object store (`AmazonS3Builder::from_env()`); `experiment.env` supplies the
 To cap storage bandwidth, set `MINIO_EGRESS_BW` (e.g. `1G`) in
 `experiments/s3-central/experiment.env` — `deploy.sh` applies it as a
 `kubernetes.io/egress-bandwidth` annotation on the MinIO pod (requires the CNI
-`bandwidth` plugin). Empty = unshaped.
+`bandwidth` plugin). Empty = unshaped. Verify the cap actually binds with
+`experiments/s3-central/measure-bw.sh` — it pulls a test object from MinIO via a
+worker pod (the real read path) and prints achieved Gbit/s.
+
+To tag a sweep per network condition, set `NAME_PREFIX` (e.g. `NAME_PREFIX=bw1g_`)
+so the three passes write distinct run dirs and don't collide on the resume check:
+
+```sh
+KS="1 2 3 5 10 15 20" REPS="1 2 3" QUERIES=1000 \
+  MINIO_EGRESS_BW=1G NAME_PREFIX=bw1g_ experiments/s3-central/sweep.sh
+```
 
 `check-cluster.sh` (homogeneity assert, `--net` for iperf3) and `status.sh` (pod
 placement / registered executors) are shared and unchanged.
