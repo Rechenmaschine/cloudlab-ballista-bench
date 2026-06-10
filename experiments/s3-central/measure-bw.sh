@@ -26,13 +26,16 @@ have=$("$mc" stat --json "carma/bwtest/obj-${size_mib}" 2>/dev/null | grep -o '"
 [ "${have:-0}" = "$bytes" ] || head -c "$bytes" /dev/zero | "$mc" pipe "carma/bwtest/obj-${size_mib}" >/dev/null
 kill $pf 2>/dev/null; trap - EXIT
 
-# 2. Pull it over $streams parallel streams from a worker pod; sum throughput.
+# 2. Pull it over $streams concurrent streams from a worker pod. Aggregate =
+#    total bytes / wall time (~ the slowest stream's time_total); summing per-
+#    stream average speeds would overcount when streams finish at different times.
 [ -n "$node" ] || node=$(echo $WORKER_NODES | awk '{print $1}')
 echo ">> pulling ${size_mib} MiB x ${streams} streams from MinIO via pod on $node (cap=${MINIO_EGRESS_BW:-none})..."
-bps=$(kubectl -n "$NAMESPACE" run "bwtest-$$" --image=nicolaka/netshoot --restart=Never --rm -i \
+maxt=$(kubectl -n "$NAMESPACE" run "bwtest-$$" --image=nicolaka/netshoot --restart=Never --rm -i \
   --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"nodeName\":\"$node\"}}" \
-  --command -- sh -c "for i in \$(seq 1 ${streams}); do curl -s -o /dev/null -w '%{speed_download}\n' http://minio:9000/bwtest/obj-${size_mib} & done; wait" 2>/dev/null \
-  | awk '{s+=$1} END{printf "%.0f", s}')
-awk -v b="$bps" -v st="$streams" -v cap="${MINIO_EGRESS_BW:-none}" 'BEGIN{
-  if (b+0 <= 0) { print "FATAL: download failed (0 B/s) -- check MinIO reachability/auth"; exit 1 }
-  printf ">> measured: %.2f Gbit/s aggregate over %d streams  (%.0f MB/s)   [cap=%s]\n", b*8/1e9, st, b/1e6, cap }'
+  --command -- sh -c "for i in \$(seq 1 ${streams}); do curl -s -o /dev/null -w '%{time_total}\n' http://minio:9000/bwtest/obj-${size_mib} & done; wait" </dev/null 2>/dev/null \
+  | awk '{if ($1+0 > m) m=$1+0} END{printf "%.3f", m}')
+awk -v t="$maxt" -v tot="$(( bytes * streams ))" -v st="$streams" -v cap="${MINIO_EGRESS_BW:-none}" 'BEGIN{
+  if (t+0 <= 0) { print "FATAL: download failed (no timing) -- check MinIO reachability/auth"; exit 1 }
+  bps = tot / t
+  printf ">> measured: %.2f Gbit/s aggregate over %d streams  (%.0f MB/s)   [cap=%s]\n", bps*8/1e9, st, bps/1e6, cap }'
